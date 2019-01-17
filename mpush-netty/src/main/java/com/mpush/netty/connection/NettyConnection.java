@@ -22,8 +22,8 @@ package com.mpush.netty.connection;
 import com.mpush.api.connection.Connection;
 import com.mpush.api.connection.SessionContext;
 import com.mpush.api.protocol.Packet;
-import com.mpush.api.spi.SpiLoader;
-import com.mpush.api.spi.core.CipherFactory;
+import com.mpush.api.spi.core.RsaCipherFactory;
+import com.mpush.tools.log.Logs;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelFutureListener;
@@ -37,10 +37,9 @@ import org.slf4j.LoggerFactory;
  */
 public final class NettyConnection implements Connection, ChannelFutureListener {
     private static final Logger LOGGER = LoggerFactory.getLogger(NettyConnection.class);
-    private static final CipherFactory factory = SpiLoader.load(CipherFactory.class);
     private SessionContext context;
     private Channel channel;
-    private volatile int status = STATUS_NEW;
+    private volatile byte status = STATUS_NEW;
     private long lastReadTime;
     private long lastWriteTime;
 
@@ -50,8 +49,8 @@ public final class NettyConnection implements Connection, ChannelFutureListener 
         this.context = new SessionContext();
         this.lastReadTime = System.currentTimeMillis();
         this.status = STATUS_CONNECTED;
-        if (security && factory != null) {
-            this.context.changeCipher(factory.get());
+        if (security) {
+            this.context.changeCipher(RsaCipherFactory.create());
         }
     }
 
@@ -77,13 +76,30 @@ public final class NettyConnection implements Connection, ChannelFutureListener 
 
     @Override
     public ChannelFuture send(Packet packet, final ChannelFutureListener listener) {
-        if (channel.isActive() && channel.isWritable()) {
+        if (channel.isActive()) {
+
+            ChannelFuture future = channel.writeAndFlush(packet.toFrame(channel)).addListener(this);
+
             if (listener != null) {
-                return channel.writeAndFlush(packet).addListener(listener).addListener(this);
-            } else {
-                return channel.writeAndFlush(packet).addListener(this);
+                future.addListener(listener);
             }
+
+            if (channel.isWritable()) {
+                return future;
+            }
+
+            //阻塞调用线程还是抛异常？
+            //return channel.newPromise().setFailure(new RuntimeException("send data too busy"));
+            if (!future.channel().eventLoop().inEventLoop()) {
+                future.awaitUninterruptibly(100);
+            }
+            return future;
         } else {
+            /*if (listener != null) {
+                channel.newPromise()
+                        .addListener(listener)
+                        .setFailure(new RuntimeException("connection is disconnected"));
+            }*/
             return this.close();
         }
     }
@@ -97,13 +113,17 @@ public final class NettyConnection implements Connection, ChannelFutureListener 
 
     @Override
     public boolean isConnected() {
-        return status == STATUS_CONNECTED || channel.isActive();
+        return status == STATUS_CONNECTED;
     }
 
     @Override
-    public boolean heartbeatTimeout() {
-        long between = System.currentTimeMillis() - lastReadTime;
-        return context.heartbeat > 0 && between > context.heartbeat;
+    public boolean isReadTimeout() {
+        return System.currentTimeMillis() - lastReadTime > context.heartbeat + 1000;
+    }
+
+    @Override
+    public boolean isWriteTimeout() {
+        return System.currentTimeMillis() - lastWriteTime > context.heartbeat - 1000;
     }
 
     @Override
@@ -112,28 +132,24 @@ public final class NettyConnection implements Connection, ChannelFutureListener 
     }
 
     @Override
-    public long getLastReadTime() {
-        return lastReadTime;
-    }
-
-    @Override
     public void operationComplete(ChannelFuture future) throws Exception {
         if (future.isSuccess()) {
             lastWriteTime = System.currentTimeMillis();
         } else {
             LOGGER.error("connection send msg error", future.cause());
+            Logs.CONN.error("connection send msg error={}, conn={}", future.cause().getMessage(), this);
         }
     }
 
+    @Override
     public void updateLastWriteTime() {
         lastWriteTime = System.currentTimeMillis();
     }
 
-
     @Override
     public String toString() {
-        return "NettyConnection [context=" + context
-                + ", channel=" + channel
+        return "[channel=" + channel
+                + ", context=" + context
                 + ", status=" + status
                 + ", lastReadTime=" + lastReadTime
                 + ", lastWriteTime=" + lastWriteTime
@@ -145,5 +161,18 @@ public final class NettyConnection implements Connection, ChannelFutureListener 
         return channel;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
 
+        NettyConnection that = (NettyConnection) o;
+
+        return channel.id().equals(that.channel.id());
+    }
+
+    @Override
+    public int hashCode() {
+        return channel.id().hashCode();
+    }
 }

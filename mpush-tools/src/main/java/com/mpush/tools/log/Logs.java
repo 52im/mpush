@@ -24,6 +24,7 @@ import com.typesafe.config.ConfigRenderOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+
 /**
  * Created by ohun on 2016/5/16.
  *
@@ -36,6 +37,7 @@ public interface Logs {
         if (logInit) return true;
         System.setProperty("log.home", CC.mp.log_dir);
         System.setProperty("log.root.level", CC.mp.log_level);
+        System.setProperty("logback.configurationFile", CC.mp.log_conf_path);
         LoggerFactory
                 .getLogger("console")
                 .info(CC.mp.cfg.root().render(ConfigRenderOptions.concise().setFormatted(true)));
@@ -44,17 +46,19 @@ public interface Logs {
 
     Logger Console = LoggerFactory.getLogger("console"),
 
-    Conn = LoggerFactory.getLogger("mpush.conn.log"),
+    CONN = LoggerFactory.getLogger("mpush.conn.log"),
 
-    Monitor = LoggerFactory.getLogger("mpush.monitor.log"),
+    MONITOR = LoggerFactory.getLogger("mpush.monitor.log"),
 
     PUSH = LoggerFactory.getLogger("mpush.push.log"),
 
     HB = LoggerFactory.getLogger("mpush.heartbeat.log"),
 
-    REDIS = LoggerFactory.getLogger("mpush.redis.log"),
+    CACHE = LoggerFactory.getLogger("mpush.cache.log"),
 
-    ZK = LoggerFactory.getLogger("mpush.zk.log"),
+    RSD = LoggerFactory.getLogger("mpush.srd.log"),
 
-    HTTP = LoggerFactory.getLogger("mpush.http.log");
+    HTTP = LoggerFactory.getLogger("mpush.http.log"),
+
+    PROFILE = LoggerFactory.getLogger("mpush.profile.log");
 }
